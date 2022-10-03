@@ -1,3 +1,25 @@
+/*
+Compiled and uploaded to ESP32 10/1/2022
+Verified working with IBM 5110 Type 2
+
+The Arduino version is in 5110KBD.c
+See the notes at the top of that, the usage is identical.
+
+   IBM kbd Connector                  ESP32
+                                    (USB connector on this side)
+   B04/KBD_P --------\/\/330ohm\/\/\---- D0   0
+   B12/KBD_7 --------\/\/330ohm\/\/\---- D15  15
+   B13/KBD_6 --------\/\/330ohm\/\/\---- D2   2
+   B10/KBD_5 --------\/\/330ohm\/\/\---- D4   4
+   B09/KBD_4 --------\/\/330ohm\/\/\---- RX2  16
+   B08/KBD_3 --------\/\/330ohm\/\/\---- TX2  17
+   D13/KBD_2 --------\/\/330ohm\/\/\---- D5   5 
+   D06/KBD_1 --------\/\/330ohm\/\/\---- D18  18
+   B05/KBD_0 --------\/\/330ohm\/\/\---- D19  19
+   B07/KBD_STROBE----\/\/330ohm\/\/\---- D21  21
+                                   (Wireless chip towards this side)
+
+*/
 #include "freertos/FreeRTOS.h"   
 #include "freertos/task.h"  // vTaskDelay
 #include "driver/gpio.h"  // gpio_XXX functions
@@ -296,7 +318,11 @@ int incomingByte = 0;       // what code is coming in from the terminal
 int out_scan_code = -1;     // translated scancode/keycode to send out (maybe 1:1 conversion, or a synthetic output based on interpreted sequence of inputs)
 int out_parity = -1;        // IBM 5100 requires a valid parity value based on the content of the scancode to be output
 int parse_key_mode = FALSE; // after typing "^" we enter a parse mode, that is buffered up until we encounter "^" again
-int interpret_crlf_as_execute = TRUE;
+
+// When pasting code or content, sometimes you really want to enter hex 13 or 10, without it being
+// interpreted as ^M and becoming a press of EXECUTE on the IBM 5100.  ^E0^ can be used to turn off
+// that translation, then later turn it back using ^E1^
+int interpret_crlf_as_execute = TRUE;  
 
 static void configure_pins(void)
 {
@@ -336,11 +362,8 @@ static void configure_pins(void)
 
 void app_main(void)
 {
-    printf("CONFIGURE_PINS\n");
-
     configure_pins();
 
-    printf("INIT_PARITY_BITS\n");
     // Initialize all the KBD_PARITY bits or the given set of scan codes
     // NOTE: This is done in code in case the scan codes change (e.g. 5100 vs 5110), and also so that they are
     // just computed once instead of during each key press.
@@ -361,15 +384,17 @@ void app_main(void)
         if ((bit_count % 2) != 0) parity_values[i] = TRUE;  // if ODD parity, set parity_value for this index to be TRUE
         ++i;
     }
+
+    printf("HOST-TO-IBM5110 KEY TRANSLATION BEGIN\n");
     
-    printf("MAIN_LOOP_GO\n");
+    // BEGIN MAIN LOOP EXECUTIVE...
     while (1) 
     {
         // Assume no input...
         out_scan_code = -1;
         out_parity = -1;
 
-        incomingByte = getc(stdin);  // should return EOF is nothing pending
+        incomingByte = getc(stdin);  // should return EOF if nothing is pending
         if (incomingByte != EOF) 
         {
             //printf("getc = [%c|%d]\n", incomingByte, incomingByte);
@@ -437,7 +462,7 @@ void app_main(void)
                         else if ((parse_key_buffer[0] == 'E') && (parse_key_buffer[1] == '0')) { interpret_crlf_as_execute = FALSE; }  // turn OFF CRLF interpretation
                         else if ((parse_key_buffer[0] == 'E') && (parse_key_buffer[1] == '1')) { interpret_crlf_as_execute = TRUE; }  // turn ON CRLF interpretation (default)
 
-                        else                                                                 out_scan_code = -1;
+                        else                                                                   out_scan_code = -1;
 
                         if (out_scan_code >= 0)
                         {
